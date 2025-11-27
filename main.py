@@ -377,4 +377,22 @@ def participant_login(request: ParticipantLoginRequest, sheets_manager: SheetsMa
         "message": "登入成功，歡迎使用會議報到 App。"
     }
 
+# 7. 獲取所有議程項目 API (App B 流程 #0)
+@app.get("/api/v1/events/agenda-items", tags=["Events"], summary="Get All Agenda Items")
+def get_all_agenda_items(sheets_manager: SheetsManager = Depends(get_sheets_manager)):
+    """獲取所有有效的議程項目列表。"""
+    try:
+        # 呼叫 SheetsManager 獲取 'Agenda_Items' 工作表的所有記錄
+        agenda_items = sheets_manager.get_all_records('Agenda_Items')
+        
+        # ⚠️ 注意：由於 sheets_manager.get_all_records() 在未連線時返回 []，
+        # 這裡不需要額外處理 SheetsManager 連線失敗的邏輯，它會自動返回空列表。
+        # 但如果 SheetsManager 連線成功但工作表讀取失敗，則會拋出異常。
+        
+        return {
+            "status": "success",
+            "agenda_items": agenda_items
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"讀取議程項目失敗: {e}")
 # --- 運行應用程式 (註釋：由 uvicorn main:app --reload 執行) ---
