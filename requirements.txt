@@ -1,0 +1,9 @@
+# requirements.txt
+fastapi
+uvicorn
+gunicorn
+pydantic
+PyJWT
+bcrypt
+gspread
+python-dotenv
