@@ -1,14 +1,15 @@
-# sheets_manager.py
+# sheets_manager.py (修訂版，支持 Render 環境變數連線)
 
 import gspread
 from gspread.exceptions import WorksheetNotFound
 import bcrypt
 import time
 import uuid
-import os # 🆕 新增: 處理環境變數
+import os 
+import json # 🆕 必須新增: 用於解析環境變數中的 JSON 字串
 
 # --- 配置 (Config) ---
-# 更改為從環境變數讀取路徑，以配合 Cloud Run 的 Secret Manager 掛載
+# 檔案路徑模式的備用配置 (在 Render 上通常無效，但保留備用)
 SERVICE_ACCOUNT_FILE = os.environ.get(
     'SERVICE_ACCOUNT_JSON_PATH', 
     'gen-lang-client-0392311291-771068520057.json'
@@ -35,16 +36,31 @@ class SheetsManager:
         self.is_connected = False
         self.spreadsheet = None
         self.gc = None
-        try:
-            # 嘗試連接 Google Sheets
-            self.gc = gspread.service_account(filename=SERVICE_ACCOUNT_FILE)
-            self.spreadsheet = self.gc.open(SPREADSHEET_NAME)
-            self.is_connected = True
-            print("SheetsManager 連接成功。")
-        except Exception as e:
-            # 捕獲錯誤，但不要 re-raise (關鍵修復!)，讓 main.py 可以繼續載入路由。
-            print(f"警告：Google Sheets 連接失敗。路由已載入，但所有 API 將返回空數據或虛擬數據：{e}")
-            
+        
+        # 🆕 關鍵：從 Render 環境變數 GSPREAD_SECRET 讀取 JSON 內容
+        gspread_secret_json = os.environ.get('GSPREAD_SECRET')
+        
+        if gspread_secret_json:
+            # 嘗試使用環境變數連線 (Render 上的正確方法)
+            try:
+                credentials = json.loads(gspread_secret_json)
+                self.gc = gspread.service_account_from_dict(credentials) 
+                self.spreadsheet = self.gc.open(SPREADSHEET_NAME)
+                self.is_connected = True
+                print("SheetsManager 連接成功 (使用環境變數 GSPREAD_SECRET)。")
+            except Exception as e:
+                print(f"警告：Google Sheets 連接失敗 (環境變數模式)。請檢查 GSPREAD_SECRET 變數或金鑰內容: {e}")
+        else:
+            # 如果沒有 GSPREAD_SECRET，則嘗試使用舊的檔案路徑模式
+            try:
+                self.gc = gspread.service_account(filename=SERVICE_ACCOUNT_FILE)
+                self.spreadsheet = self.gc.open(SPREADSHEET_NAME)
+                self.is_connected = True
+                print("SheetsManager 連接成功 (使用備用檔案路徑模式)。")
+            except Exception as e:
+                # 連線失敗的具體錯誤在這裡，導致 main.py 拋出 503
+                print(f"警告：Google Sheets 連接失敗。路由已載入，但所有 API 將返回 503 錯誤：{e}")
+                
     def get_worksheet(self, title: str):
         """獲取指定名稱的工作表對象"""
         if not self.is_connected:
@@ -89,7 +105,7 @@ class SheetsManager:
         if not self.is_connected:
             # 返回虛擬的管理員數據，讓 admin-login 至少可以被測試
             if username == "admin":
-                 # 密碼 "password123" 的 bcrypt hash
+                 # 密碼 "test1234" 的 bcrypt hash
                 hashed_pw = "$2b$12$W91R.1w3s.iLp2H5bY0VRe.s6N6Z2S9n.N0nC5sE2s0V/u8p5P9N." 
                 return {'id': '1', 'username': 'admin', 'password_hash': hashed_pw, 'role': 'SUPER_ADMIN', 'last_login': ''}
             return None
@@ -118,7 +134,7 @@ class SheetsManager:
             print(f"寫入 {sheet_name} 失敗: {e}")
             raise 
             
-    # 🆕 新增 Token 相關方法:
+    # 🆕 Token 相關方法:
     def add_qr_token(self, token_data: dict):
         """新增一個 QR Token 記錄到 Qr_Tokens 表。"""
         if not self.is_connected:
@@ -173,7 +189,7 @@ class SheetsManager:
         """執行資料庫初始化邏輯"""
         if not self.is_connected:
              raise Exception("Google Sheets 服務未連接，無法初始化。請檢查憑證。")
-             
+            
         initialized_sheets = []
         
         # 1. 處理工作表的創建、清空與表頭寫入
